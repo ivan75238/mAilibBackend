@@ -1,0 +1,276 @@
+import { Request, Response } from "express";
+import { v4 as uuid, validate as uuidValidate } from "uuid";
+import { groupBy } from "lodash";
+
+import { FANTLAB_GET_BOOK, FANTLAB_SEARCH_MAIN } from "../consts/fantlabUrls";
+import { IFantlabSearchResponse } from "../interfaces/fantlab/IFantlabSearchResponse";
+import pool from "../db";
+import IBookDto from "../interfaces/mailib/dto/IBookDto";
+import { IFantlabGetBookResponse } from "../interfaces/fantlab/IFantlabGetBookResponse";
+import { FantlabSearchTypeEnum } from "../enums/fantlabSearchTypeEnum";
+import { addAuthor, getAuthorByFantlabId } from "./authorController";
+import IBookEntity from "../interfaces/mailib/entity/IBookEntity";
+import { IFantlabGenre } from "../interfaces/fantlab/IFantlabGenre";
+import { flatGenres } from "../utils/flatGenres";
+import { addGenres, getGenresByFantlabId } from "./genreController";
+import IGenreDto from "../interfaces/mailib/dto/IGenreDto";
+import IAuthorDto from "../interfaces/mailib/dto/IAuthorDto";
+import getBookDetailsSql from "../sql/getBookDetailsSql";
+import { IFantlabWork } from "../interfaces/fantlab/IFantlabWork";
+
+const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
+  const { q } = req.query;
+
+  const isWorks = (
+    obj: IFantlabSearchResponse<
+      FantlabSearchTypeEnum.AUTHORS | FantlabSearchTypeEnum.WORKS
+    >
+  ): obj is IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS> => {
+    return obj.type === FantlabSearchTypeEnum.WORKS;
+  };
+
+  try {
+    const response = await fetch(`${FANTLAB_SEARCH_MAIN}?q=` + q);
+    const data: Array<
+      IFantlabSearchResponse<
+        FantlabSearchTypeEnum.AUTHORS | FantlabSearchTypeEnum.WORKS
+      >
+    > = await response.json();
+
+
+    // 1, 3, 8, 13, 17, 41, 42, 43, - id типов, которые пропускаем
+    // взято из https://api.fantlab.ru/config.json
+
+    const books: IBookEntity[] = [];
+    const worksGroup = data.find(isWorks);
+
+    if (worksGroup?.matches?.length) {
+      worksGroup.matches
+        .filter(i => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
+        .map((work) => {
+        const authors: IAuthorDto[] = [];
+
+        for (let i = 1; i <= 5; i += 1) {
+          const keyId = `autor${i}_id` as keyof IFantlabWork;
+          const keyName = `autor${i}_rusname` as keyof IFantlabWork;
+          const id = work[keyId] as number;
+          const name = work[keyName] as string;
+
+          if (id && name) {
+            authors.push({
+              id: id.toString(),
+              fantlab_id: id,
+              name,
+            });
+          }
+        }
+
+        books.push({
+          id: undefined,
+          fantlab_id: work.work_id,
+          name: work.rusname,
+          description: "",
+          image_big: "",
+          image_small: work.pic_edition_id_auto
+            ? `https://fantlab.ru/images/editions/small/${work.pic_edition_id_auto}`
+            : "",
+          authors,
+          genres: [
+            {
+              id: "",
+              name: work.name_show_im,
+            },
+          ],
+        });
+      });
+    }
+
+    res.json(books);
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
+const addBookFromOurDb = async (book: IBookDto) => {
+  return await pool.query(
+    "INSERT INTO books(id, name, description, image_big, image_small, isbn_list, fantlab_id) values($1, $2, $3, $4, $5, $6, $7)",
+    [
+      book.id,
+      book.name,
+      book.description,
+      book.image_big,
+      book.image_small,
+      book.isbn_list,
+      book.fantlab_id,
+    ]
+  );
+};
+
+const convertBookDtoToBookEntity = (rows: any[]) => {
+  const genres: IGenreDto[] = [];
+
+  Object.values(groupBy(rows, "genre_id")).map((item) => {
+    if (item.length) {
+      genres.push({
+        id: item[0].genre_id,
+        name: item[0].genre_name,
+      });
+    }
+  });
+
+  const authors: IAuthorDto[] = [];
+
+  Object.values(groupBy(rows, "author_id")).map((item) => {
+    if (item.length) {
+      authors.push({
+        id: item[0].author_id,
+        name: item[0].author_name,
+      });
+    }
+  });
+
+  const newBookEntity: IBookEntity = {
+    id: rows[0].id,
+    name: rows[0].name,
+    description: rows[0].description,
+    image_big: rows[0].image_big,
+    image_small: rows[0].image_small,
+    isbn_list: rows[0].isbn_list,
+    fantlab_id: rows[0].fantlab_id,
+    authors,
+    genres,
+  };
+
+  return newBookEntity;
+};
+
+const getBookFromOurDbById = async (id: string) => {
+  const { rows } = await pool.query(`${getBookDetailsSql} b.id = $1`, [id]);
+
+  if (rows.length === 0) return null;
+
+  return convertBookDtoToBookEntity(rows);
+};
+
+const getBookFromOurDbByFantlabId = async (fantlabId: string) => {
+  const { rows } = await pool.query(`${getBookDetailsSql} b.fantlab_id = $1`, [
+    fantlabId,
+  ]);
+
+  if (rows.length === 0) return null;
+
+  return convertBookDtoToBookEntity(rows);
+};
+
+const getBookFromFantlab = async (id: string) => {
+  try {
+    const response = await fetch(FANTLAB_GET_BOOK(id));
+    const data: IFantlabGetBookResponse = await response.json();
+
+    const newBook: IBookDto = {
+      id: uuid(),
+      fantlab_id: data.work_id.toString(),
+      name: data.work_name,
+      description: data.work_description,
+      image_small: data.image_preview,
+      image_big: data.image,
+      isbn_list: data.editions_info?.isbn_list,
+    };
+
+    await addBookFromOurDb(newBook);
+
+    const newBookEntity: IBookEntity = { ...newBook, authors: [], genres: [] };
+
+    newBookEntity.authors = await Promise.all(
+      data.authors.map((author) => checkAndSaveAuthor(author, newBook))
+    );
+
+    const genresGroup = data.classificatory.genre_group.find(
+      (i) => i.label.toUpperCase().indexOf("ЖАНР") > -1
+    );
+
+    if (genresGroup) {
+      newBookEntity.genres = await Promise.all(
+        flatGenres(genresGroup.genre).map((genre) =>
+          checkAndSaveGenre(genre, newBook)
+        )
+      );
+    }
+
+    return newBookEntity;
+  } catch (e) {
+    return null;
+  }
+};
+
+const checkAndSaveAuthor = async (
+  author: { id: number; name: string },
+  book: IBookDto
+) => {
+  let authorFromDb = await getAuthorByFantlabId(author.id);
+
+  if (!authorFromDb) {
+    authorFromDb = {
+      id: uuid(),
+      fantlab_id: author.id,
+      name: author.name,
+    };
+
+    await addAuthor(authorFromDb);
+  }
+
+  await pool.query(
+    "INSERT INTO authors_books(id, author_id, book_id) values($1, $2, $3)",
+    [uuid(), authorFromDb.id, book.id]
+  );
+
+  return authorFromDb;
+};
+
+const checkAndSaveGenre = async (genre: IFantlabGenre, book: IBookDto) => {
+  let genreFromDb = await getGenresByFantlabId(genre.genre_id);
+
+  if (!genreFromDb) {
+    genreFromDb = {
+      id: uuid(),
+      fantlab_id: genre.genre_id,
+      name: genre.label,
+    };
+
+    await addGenres(genreFromDb);
+  }
+
+  await pool.query(
+    "INSERT INTO genres_books(id, genre_id, book_id) values($1, $2, $3)",
+    [uuid(), genreFromDb.id, book.id]
+  );
+
+  return genreFromDb;
+};
+
+const getBookById = async (
+  req: Request<{ id: string }, {}, {}>,
+  res: Response
+) => {
+  try {
+    const { id } = req.params;
+
+    let book: IBookEntity | null = null;
+
+    if (uuidValidate(id)) {
+      book = await getBookFromOurDbById(id);
+    } else {
+      book = await getBookFromOurDbByFantlabId(id);
+
+      if (!book) {
+        book = await getBookFromFantlab(id);
+      }
+    }
+
+    res.status(200).json(book);
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
+export default { search, getBookById };
