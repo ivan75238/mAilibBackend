@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
-    origin: "http://localhost:3001, https://mailib.ru", // Укажите ваш фронтенд-адрес
+    origin: "*", // Укажите ваш фронтенд-адрес
     credentials: true, // Если используете куки/авторизацию
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
