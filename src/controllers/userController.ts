@@ -1,8 +1,13 @@
-import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { Request, Response } from "express";
 
-export default {
-  getAllUsers: (req: Request, res: Response) => {
-    res.json([{ id: 1, name: 'John Doe' }]);
+const getCurrentUser = (req: Request, res: Response) => {
+  const user = req.session.user;
+
+  if (!user) { 
+    res.status(401).json({ error: "Unauthorized" });
   }
+  
+  res.json(user);
 };
+
+export default { getCurrentUser };

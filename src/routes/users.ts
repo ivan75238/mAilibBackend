@@ -1,11 +1,8 @@
-import { Router } from 'express';
-import UserController from '../controllers/userController';
-import authMiddleware from '../middleware/authMiddleware';
+import { Router } from "express";
+import UserController from "../controllers/userController";  
 
 const router = Router();
 
-
-// Защищенные маршруты (требуют JWT)
-router.get('/users', authMiddleware, UserController.getAllUsers);
+router.get("/current", UserController.getCurrentUser);
 
 export default router;

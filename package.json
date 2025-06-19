@@ -1,5 +1,5 @@
 {
-  "name": "server",
+  "name": "mailib-server",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -12,8 +12,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "express-bearer-token": "^3.0.0",
+    "express-session": "^1.18.1",
     "jsonwebtoken": "^9.0.2",
     "lodash": "^4.17.21",
     "nodemailer": "^7.0.3",
@@ -21,7 +24,9 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.2",
+    "@types/express-session": "^1.18.2",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.29",
