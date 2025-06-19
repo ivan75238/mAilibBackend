@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
   "https://mailib.ru",
-  "http://localhost:3000", // Ваш локальный фронтенд
+  "http://localhost:3000", 
+  "http://localhost:3001", 
 ];
 
 app.use(
