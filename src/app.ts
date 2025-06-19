@@ -15,9 +15,14 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = [
+  "https://mailib.ru",
+  "http://localhost:3000", // Ваш локальный фронтенд
+];
+
 app.use(
   cors({
-    origin: "*", // Укажите ваш фронтенд-адрес
+    origin: allowedOrigins,
     credentials: true, // Если используете куки/авторизацию
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
