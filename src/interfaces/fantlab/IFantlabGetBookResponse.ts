@@ -1,3 +1,4 @@
+import { IFantlabCycle } from "./IFantlabCycle";
 import { IFantlabGenre } from "./IFantlabGenre";
 
 export interface IFantlabGetBookResponse {
@@ -22,4 +23,5 @@ export interface IFantlabGetBookResponse {
       label: string;
     }[];
   };
+  work_root_saga: IFantlabCycle[];
 }

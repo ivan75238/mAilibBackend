@@ -17,6 +17,9 @@ import IGenreDto from "../interfaces/mailib/dto/IGenreDto";
 import IAuthorDto from "../interfaces/mailib/dto/IAuthorDto";
 import getBookDetailsSql from "../sql/getBookDetailsSql";
 import { IFantlabWork } from "../interfaces/fantlab/IFantlabWork";
+import { addCycle, getCycleByFantlabId } from "./cycleController";
+import { IFantlabCycle } from "../interfaces/fantlab/IFantlabCycle";
+import ICycleDto from "../interfaces/mailib/dto/ICycleDto";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -37,7 +40,6 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
       >
     > = await response.json();
 
-
     // 1, 3, 8, 13, 17, 41, 42, 43, - id типов, которые пропускаем
     // взято из https://api.fantlab.ru/config.json
 
@@ -46,43 +48,44 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
 
     if (worksGroup?.matches?.length) {
       worksGroup.matches
-        .filter(i => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
+        .filter((i) => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
         .map((work) => {
-        const authors: IAuthorDto[] = [];
+          const authors: IAuthorDto[] = [];
 
-        for (let i = 1; i <= 5; i += 1) {
-          const keyId = `autor${i}_id` as keyof IFantlabWork;
-          const keyName = `autor${i}_rusname` as keyof IFantlabWork;
-          const id = work[keyId] as number;
-          const name = work[keyName] as string;
+          for (let i = 1; i <= 5; i += 1) {
+            const keyId = `autor${i}_id` as keyof IFantlabWork;
+            const keyName = `autor${i}_rusname` as keyof IFantlabWork;
+            const id = work[keyId] as number;
+            const name = work[keyName] as string;
 
-          if (id && name) {
-            authors.push({
-              id: id.toString(),
-              fantlab_id: id,
-              name,
-            });
+            if (id && name) {
+              authors.push({
+                id: id.toString(),
+                fantlab_id: id,
+                name,
+              });
+            }
           }
-        }
 
-        books.push({
-          id: undefined,
-          fantlab_id: work.work_id,
-          name: work.rusname,
-          description: "",
-          image_big: "",
-          image_small: work.pic_edition_id_auto
-            ? `https://fantlab.ru/images/editions/small/${work.pic_edition_id_auto}`
-            : "",
-          authors,
-          genres: [
-            {
-              id: "",
-              name: work.name_show_im,
-            },
-          ],
+          books.push({
+            id: undefined,
+            fantlab_id: work.work_id,
+            name: work.rusname,
+            description: "",
+            image_big: "",
+            image_small: work.pic_edition_id_auto
+              ? `https://fantlab.ru/images/editions/small/${work.pic_edition_id_auto}`
+              : "",
+            authors,
+            genres: [
+              {
+                id: "",
+                name: work.name_show_im,
+              },
+            ],
+            cycles: [],
+          });
         });
-      });
     }
 
     res.json(books);
@@ -129,6 +132,17 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
     }
   });
 
+  const cycles: ICycleDto[] = [];
+
+  Object.values(groupBy(rows, "cycle_id")).map((item) => {
+    if (item.length) {
+      cycles.push({
+        id: item[0].cycle_id,
+        name: item[0].cycle_name,
+      });
+    }
+  });
+
   const newBookEntity: IBookEntity = {
     id: rows[0].id,
     name: rows[0].name,
@@ -139,6 +153,7 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
     fantlab_id: rows[0].fantlab_id,
     authors,
     genres,
+    cycles,
   };
 
   return newBookEntity;
@@ -179,7 +194,12 @@ const getBookFromFantlab = async (id: string) => {
 
     await addBookFromOurDb(newBook);
 
-    const newBookEntity: IBookEntity = { ...newBook, authors: [], genres: [] };
+    const newBookEntity: IBookEntity = {
+      ...newBook,
+      authors: [],
+      genres: [],
+      cycles: [],
+    };
 
     newBookEntity.authors = await Promise.all(
       data.authors.map((author) => checkAndSaveAuthor(author, newBook))
@@ -196,6 +216,10 @@ const getBookFromFantlab = async (id: string) => {
         )
       );
     }
+
+    newBookEntity.cycles = await Promise.all(
+      data.work_root_saga.map((cycle) => checkAndSaveCycle(cycle, newBook))
+    );
 
     return newBookEntity;
   } catch (e) {
@@ -246,6 +270,26 @@ const checkAndSaveGenre = async (genre: IFantlabGenre, book: IBookDto) => {
   );
 
   return genreFromDb;
+};
+
+const checkAndSaveCycle = async (cycle: IFantlabCycle, book: IBookDto) => {
+  let cycleFromDb = await getCycleByFantlabId(cycle.work_id);
+
+  if (!cycleFromDb) {
+    cycleFromDb = {
+      id: uuid(),
+      name: cycle.work_name,
+    };
+
+    await addCycle(cycleFromDb);
+  }
+
+  await pool.query(
+    "INSERT INTO cycles_books(id, cycle_id, book_id) values($1, $2, $3)",
+    [uuid(), cycleFromDb.id, book.id]
+  );
+
+  return cycleFromDb;
 };
 
 const getBookById = async (
