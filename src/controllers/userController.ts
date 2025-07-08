@@ -1,13 +1,36 @@
 import { Request, Response } from "express";
+import pool from "../db";
+import IUserDto from "../interfaces/mailib/dto/IUserDto";
 
-const getCurrentUser = (req: Request, res: Response) => {
+const getCurrentUser = async (req: Request, res: Response) => {
   const user = req.session.user;
 
-  if (!user) { 
+  if (!user) {
     res.status(401).json({ error: "Unauthorized" });
+    return;
   }
-  
-  res.json(user);
+
+  const { rows } = await pool.query<IUserDto>(
+    "SELECT * FROM users WHERE id = $1",
+    [user.id]
+  );
+
+  req.session.user = rows[0];
+
+  res.json(rows[0]);
 };
 
-export default { getCurrentUser };
+const getUserByEmail = async (email: string) => {
+  const { rows } = await pool.query<IUserDto>(
+    "SELECT * FROM users WHERE email = $1",
+    [email]
+  );
+
+  if (!rows.length) {
+    return undefined;
+  }
+
+  return rows[0];
+};
+
+export default { getCurrentUser, getUserByEmail };

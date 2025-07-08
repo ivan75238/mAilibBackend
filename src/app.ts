@@ -5,6 +5,7 @@ import bearerToken from "express-bearer-token";
 import dotenv from "dotenv";
 import mainRouter from "./routes/users";
 import bookRouter from "./routes/books";
+import familyRouter from "./routes/family";
 import pool from "./db";
 import authController from "./controllers/authController";
 import sqlInjectionMiddleware from "./middleware/sqlInjectionMiddleware";
@@ -52,7 +53,8 @@ app.post("/sendChangePassword", authController.sendChangePassword);
 app.post("/changePassword", authController.changePassword);
 
 app.use("/users", authMiddleware, mainRouter);
-app.use("/books", bookRouter);
+app.use("/books", authMiddleware, bookRouter);
+app.use("/family", authMiddleware, familyRouter);
 
 // Роут для тестирования БД
 app.get("/test-db", async (req, res) => {

@@ -5,6 +5,7 @@ import IUserDto from "../interfaces/mailib/dto/IUserDto";
 import { v4 as uuidv4 } from "uuid";
 import { createHash } from "crypto";
 import sendEmail from "../utils/sendEmail";
+import { checkPostParams } from "../utils/checkPostParams";
 
 const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET!;
 const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET!;
@@ -36,26 +37,29 @@ const register = async (
     {},
     {},
     {
-      email?: string;
-      password?: string;
+      email: string;
+      password: string;
       firstName: string;
       lastName: string;
-      middleName?: string;
+      middleName: string;
     }
   >,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (
+    !checkPostParams(req, [
+      "email",
+      "password",
+      "firstName",
+      "lastName",
+      "middleName",
+    ])
+  ) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { email, password, firstName, lastName, middleName } = req.body;
-
-  if (!email || !password || !firstName || !lastName) {
-    res.status(400).json({ message: "Invalid data" });
-    return;
-  }
 
   const userInDb = await getUser(email);
 
@@ -92,22 +96,17 @@ const resendCode = async (
     {},
     {},
     {
-      email?: string;
+      email: string;
     }
   >,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (!checkPostParams(req, ["email"])) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { email } = req.body;
-
-  if (!email) {
-    res.status(400).json({ message: "Invalid data" });
-    return;
-  }
 
   const userInDb = await getUser(email);
 
@@ -135,22 +134,17 @@ const sendChangePassword = async (
     {},
     {},
     {
-      email?: string;
+      email: string;
     }
   >,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (!checkPostParams(req, ["email"])) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { email } = req.body;
-
-  if (!email) {
-    res.status(400).json({ message: "Invalid data" });
-    return;
-  }
 
   const userInDb = await getUser(email);
 
@@ -182,22 +176,22 @@ const changePassword = async (
     {},
     {},
     {
-      token?: string;
-      password?: string;
-      passwordRepeat?: string;
+      token: string;
+      password: string;
+      passwordRepeat: string;
     }
   >,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (!checkPostParams(req, ["password", "passwordRepeat", "token"])) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { password, passwordRepeat, token } = req.body;
 
-  if (!password || !passwordRepeat || !token) {
-    res.status(400).json({ message: "Invalid data" });
+  if (password !== passwordRepeat) {
+    res.status(400).json({ message: "Пароли не совпадают" });
     return;
   }
 
@@ -222,20 +216,15 @@ const changePassword = async (
 };
 
 const verify = async (
-  req: Request<{}, {}, { code?: string; email?: string }>,
+  req: Request<{}, {}, { code: string; email: string }>,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (!checkPostParams(req, ["code", "email"])) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { code, email } = req.body;
-
-  if (!email || !code) {
-    res.status(400).json({ message: "Invalid data" });
-    return;
-  }
 
   const userInDb = await getUser(email);
 
@@ -257,20 +246,15 @@ const verify = async (
 };
 
 const login = async (
-  req: Request<{}, {}, { password?: string; email?: string }>,
+  req: Request<{}, {}, { password: string; email: string }>,
   res: Response
 ) => {
-  if (!req.body) {
-    res.status(400).json({ message: "Invalid data" });
+  if (!checkPostParams(req, ["password", "email"])) {
+    res.status(400).json({ error: "Invalid data" });
     return;
   }
 
   const { password, email } = req.body;
-
-  if (!email || !password) {
-    res.status(400).json({ message: "Invalid data" });
-    return;
-  }
 
   const { rows } = await pool.query<IUserDto>(
     "SELECT * FROM users WHERE email = $1 AND hash = $2",
