@@ -16,10 +16,15 @@ import { addGenres, getGenresByFantlabId } from "./genreController";
 import IGenreDto from "../interfaces/mailib/dto/IGenreDto";
 import IAuthorDto from "../interfaces/mailib/dto/IAuthorDto";
 import getBookDetailsSql from "../sql/getBookDetailsSql";
+import getUserLibrarySql from "../sql/getUserLibrarySql";
 import { IFantlabWork } from "../interfaces/fantlab/IFantlabWork";
 import { addCycle, getCycleByFantlabId } from "./cycleController";
 import { IFantlabCycle } from "../interfaces/fantlab/IFantlabCycle";
 import ICycleDto from "../interfaces/mailib/dto/ICycleDto";
+import { checkPostParams } from "../utils/checkPostParams";
+import { addOwner, removeOwnerByBookIdAndUserId } from "./ownerController";
+import { addReader, removeReaderByBookIdAndUserId } from "./readerController";
+import { getUserInSession } from "../utils/getUserInSession";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -317,4 +322,77 @@ const getBookById = async (
   }
 };
 
-export default { search, getBookById };
+const addBookInLibrary = async (
+  req: Request<
+    { id: string },
+    {},
+    { owner_ids: string[]; reader_ids?: string[] }
+  >,
+  res: Response
+) => {
+  if (!checkPostParams(req, ["book_id", "owner_ids", "reader_ids"])) {
+    res.status(400).json({ error: "Invalid data" });
+    return;
+  }
+
+  const { owner_ids, reader_ids } = req.body;
+  const { id } = req.params;
+
+  try {
+    // Пробегаемся по миссиву пользовтелей, которым надо добавить эту книгу во владение
+    await Promise.all(
+      owner_ids.map((user_id) => addOwner({ id: uuid(), book_id: id, user_id }))
+    );
+
+    // Если есть массив прочитавших, то побегаемся по миссиву id, которым надо добавить эту книгу в прочитанное
+    if (reader_ids) {
+      await Promise.all(
+        reader_ids.map((user_id) =>
+          addReader({ id: uuid(), book_id: id, user_id })
+        )
+      );
+    }
+
+    res.json({ message: "Book was added" });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
+const removeBookFromLibrary = async (
+  req: Request<{ id: string }, {}, { owner_ids: string[] }>,
+  res: Response
+) => {
+  if (!checkPostParams(req, ["book_id", "owner_ids"])) {
+    res.status(400).json({ error: "Invalid data" });
+    return;
+  }
+
+  const { owner_ids } = req.body;
+  const { id } = req.params;
+
+  try {
+    await removeOwnerByBookIdAndUserId(id, owner_ids);
+    await removeReaderByBookIdAndUserId(id, owner_ids);
+
+    res.json({ message: "Book was deleted" });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
+const getUserLibrary = async (req: Request<{}, {}, {}>, res: Response) => {
+  const user = getUserInSession(req, res);
+
+  const { rows } = await pool.query(getUserLibrarySql, [user.id]);
+
+  res.json(rows);
+};
+
+export default {
+  search,
+  getBookById,
+  addBookInLibrary,
+  removeBookFromLibrary,
+  getUserLibrary,
+};

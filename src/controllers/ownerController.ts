@@ -1,0 +1,36 @@
+import pool from "../db";
+import IOwnerDto from "../interfaces/mailib/dto/IOwnerDto";
+
+const addOwner = async (owner: IOwnerDto) => {
+  await pool.query(
+    `INSERT INTO owners(id, book_id, user_id)
+     SELECT $1, $2, $3 
+     WHERE NOT EXISTS (
+        SELECT 1 
+        FROM owners 
+        WHERE book_id = $2 AND user_id = $3
+    )`,
+    [owner.id, owner.book_id, owner.user_id]
+  );
+};
+
+const getOwnersByBookIdAndUserId = async (bookId: string, userId: string) => {
+  const { rows } = await pool.query<IOwnerDto>(
+    "SELECT id FROM owners WHERE book_id=$1 AND user_id=$2",
+    [bookId, userId]
+  );
+
+  return rows;
+};
+
+const removeOwnerByBookIdAndUserId = async (
+  bookId: string,
+  userIds: string[]
+) => {
+  await pool.query(
+    "DELETE FROM owners WHERE book_id = $1 AND user_id = ANY($2)",
+    [bookId, userIds]
+  );
+};
+
+export { addOwner, getOwnersByBookIdAndUserId, removeOwnerByBookIdAndUserId };
