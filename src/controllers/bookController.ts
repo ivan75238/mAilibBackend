@@ -25,7 +25,7 @@ import { checkPostParams } from "../utils/checkPostParams";
 import { addOwner, removeOwnerByBookIdAndUserId } from "./ownerController";
 import { addReader, removeReaderByBookIdAndUserId } from "./readerController";
 import { getUserInSession } from "../utils/getUserInSession";
-import getfamilyUsersIdWhoDoesntHaveBook from "../sql/getfamilyUsersIdWhoDoesntHaveBook";
+import getFamilyUsersIdWhoDoesntHaveBook from "../sql/getFamilyUsersIdWhoDoesntHaveBook";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -421,7 +421,7 @@ const getUsersIdWhoDoesntHaveBook = async (
   const user = getUserInSession(req, res);
   const book = await getBookById(id, user.id);
 
-  const { rows } = await pool.query(getfamilyUsersIdWhoDoesntHaveBook, [
+  const { rows } = await pool.query(getFamilyUsersIdWhoDoesntHaveBook, [
     user.family_id,
     book?.id,
     book?.fantlab_id,
