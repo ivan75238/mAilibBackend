@@ -8,4 +8,6 @@ export default interface IBookEntity extends Omit<IBookDto, "id"> {
   authors: IAuthorDto[];
   genres: IGenreDto[];
   cycles: ICycleDto[];
+  is_own_by_user: boolean;
+  is_read_by_user: boolean;
 }

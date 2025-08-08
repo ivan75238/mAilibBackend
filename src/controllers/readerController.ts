@@ -25,11 +25,12 @@ const getReadersByBookIdAndUserId = async (bookId: string, userId: string) => {
 
 const removeReaderByBookIdAndUserId = async (
   bookId: string,
+  fantlabBookId: string,
   userIds: string[]
 ) => {
   await pool.query(
-    "DELETE FROM readers WHERE book_id = $1 AND user_id = ANY($2)",
-    [bookId, userIds]
+    "DELETE FROM readers WHERE book_id = (id = $1 OR id = $2) AND user_id = ANY($3)",
+    [bookId, fantlabBookId, userIds]
   );
 };
 

@@ -25,6 +25,7 @@ import { checkPostParams } from "../utils/checkPostParams";
 import { addOwner, removeOwnerByBookIdAndUserId } from "./ownerController";
 import { addReader, removeReaderByBookIdAndUserId } from "./readerController";
 import { getUserInSession } from "../utils/getUserInSession";
+import getfamilyUsersIdWhoDoesntHaveBook from "../sql/getfamilyUsersIdWhoDoesntHaveBook";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -89,6 +90,8 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
               },
             ],
             cycles: [],
+            is_own_by_user: false,
+            is_read_by_user: false,
           });
         });
     }
@@ -159,22 +162,31 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
     authors,
     genres,
     cycles,
+    is_own_by_user: rows[0].is_own_by_user,
+    is_read_by_user: rows[0].is_read_by_user,
   };
 
   return newBookEntity;
 };
 
-const getBookFromOurDbById = async (id: string) => {
-  const { rows } = await pool.query(`${getBookDetailsSql} b.id = $1`, [id]);
+const getBookFromOurDbById = async (id: string, userId: string) => {
+  const { rows } = await pool.query(`${getBookDetailsSql} b.id = $1`, [
+    id,
+    userId,
+  ]);
 
   if (rows.length === 0) return null;
 
   return convertBookDtoToBookEntity(rows);
 };
 
-const getBookFromOurDbByFantlabId = async (fantlabId: string) => {
+const getBookFromOurDbByFantlabId = async (
+  fantlabId: string,
+  userId: string
+) => {
   const { rows } = await pool.query(`${getBookDetailsSql} b.fantlab_id = $1`, [
     fantlabId,
+    userId,
   ]);
 
   if (rows.length === 0) return null;
@@ -204,6 +216,8 @@ const getBookFromFantlab = async (id: string) => {
       authors: [],
       genres: [],
       cycles: [],
+      is_own_by_user: false,
+      is_read_by_user: false,
     };
 
     newBookEntity.authors = await Promise.all(
@@ -297,24 +311,31 @@ const checkAndSaveCycle = async (cycle: IFantlabCycle, book: IBookDto) => {
   return cycleFromDb;
 };
 
-const getBookById = async (
+const getBookById = async (id: string, userId: string) => {
+  let book: IBookEntity | null = null;
+
+  if (uuidValidate(id)) {
+    book = await getBookFromOurDbById(id, userId);
+  } else {
+    book = await getBookFromOurDbByFantlabId(id, userId);
+
+    if (!book) {
+      book = await getBookFromFantlab(id);
+    }
+  }
+
+  return book;
+};
+
+const getBookByIdRequest = async (
   req: Request<{ id: string }, {}, {}>,
   res: Response
 ) => {
   try {
     const { id } = req.params;
+    const user = getUserInSession(req, res);
 
-    let book: IBookEntity | null = null;
-
-    if (uuidValidate(id)) {
-      book = await getBookFromOurDbById(id);
-    } else {
-      book = await getBookFromOurDbByFantlabId(id);
-
-      if (!book) {
-        book = await getBookFromFantlab(id);
-      }
-    }
+    const book = await getBookById(id, user.id);
 
     res.status(200).json(book);
   } catch (error) {
@@ -371,9 +392,12 @@ const removeBookFromLibrary = async (
   const { owner_ids } = req.body;
   const { id } = req.params;
 
+  const user = getUserInSession(req, res);
+  const book = await getBookById(id, user.id);
+
   try {
-    await removeOwnerByBookIdAndUserId(id, owner_ids);
-    await removeReaderByBookIdAndUserId(id, owner_ids);
+    await removeOwnerByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
+    await removeReaderByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
 
     res.json({ message: "Book was deleted" });
   } catch (error) {
@@ -389,10 +413,28 @@ const getUserLibrary = async (req: Request<{}, {}, {}>, res: Response) => {
   res.json(rows);
 };
 
+const getUsersIdWhoDoesntHaveBook = async (
+  req: Request<{ id: string }, {}, {}>,
+  res: Response
+) => {
+  const { id } = req.params;
+  const user = getUserInSession(req, res);
+  const book = await getBookById(id, user.id);
+
+  const { rows } = await pool.query(getfamilyUsersIdWhoDoesntHaveBook, [
+    user.family_id,
+    book?.id,
+    book?.fantlab_id,
+  ]);
+
+  res.json(rows.map((i) => i.user_id));
+};
+
 export default {
   search,
-  getBookById,
+  getBookByIdRequest,
   addBookInLibrary,
   removeBookFromLibrary,
   getUserLibrary,
+  getUsersIdWhoDoesntHaveBook,
 };
