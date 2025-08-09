@@ -7,7 +7,7 @@ export default `WITH family_members AS (
     OR u.id = $1
 ),
 family_books AS (
-    SELECT DISTINCT b.id, b.name, b.fantlab_id
+    SELECT DISTINCT b.id, b.name, b.fantlab_id, b.type
     FROM books b
     JOIN owners o ON b.id = o.book_id OR b.fantlab_id = o.book_id
     JOIN family_members fm ON o.user_id = fm.member_id
@@ -33,6 +33,7 @@ all_readings AS (
 SELECT 
     fb.id,
     fb.name,
+    fb.type,
     fb.fantlab_id,
     COUNT(DISTINCT ar.user_id) AS read_count,
     COALESCE(
@@ -79,5 +80,5 @@ SELECT
     ) AS genres_info
 FROM family_books fb
 LEFT JOIN all_readings ar ON (ar.original_book_id = fb.id OR ar.fantlab_id = fb.fantlab_id)
-GROUP BY fb.id, fb.name, fb.fantlab_id
+GROUP BY fb.id, fb.name, fb.fantlab_id, fb.type
 ORDER BY fb.name;`;

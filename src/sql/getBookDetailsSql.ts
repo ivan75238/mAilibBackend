@@ -23,7 +23,12 @@ LEFT JOIN
 LEFT JOIN 
     cycles c ON cb.cycle_id = c.id
 LEFT JOIN 
-    owners o ON (o.book_id = b.id OR o.book_id = b.fantlab_id) AND o.user_id = $2
+    owners o ON (o.book_id = b.id OR o.book_id = b.fantlab_id) 
+             AND o.user_id = $2 
+             AND o.type = $3
 LEFT JOIN 
-    readers r ON (r.book_id = b.id OR r.book_id = b.fantlab_id) AND r.user_id = $2
-WHERE`;
+    readers r ON (r.book_id = b.id OR r.book_id = b.fantlab_id) 
+              AND r.user_id = $2
+              AND r.type = $3
+WHERE
+    b.type = $3 AND`;

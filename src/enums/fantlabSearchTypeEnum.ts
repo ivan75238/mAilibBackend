@@ -1,4 +1,5 @@
 export enum FantlabSearchTypeEnum {
-    AUTHORS = 'autors',
-    WORKS = 'works',
+  AUTHORS = "autors",
+  WORKS = "works",
+  EDITIONS = "editions",
 }

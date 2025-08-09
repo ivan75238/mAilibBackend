@@ -2,11 +2,15 @@ import { Request, Response } from "express";
 import { v4 as uuid, validate as uuidValidate } from "uuid";
 import { groupBy } from "lodash";
 
-import { FANTLAB_GET_BOOK, FANTLAB_SEARCH_MAIN } from "../consts/fantlabUrls";
+import {
+  FANTLAB_GET_EDITION,
+  FANTLAB_GET_WORK,
+  FANTLAB_SEARCH_MAIN,
+} from "../consts/fantlabUrls";
 import { IFantlabSearchResponse } from "../interfaces/fantlab/IFantlabSearchResponse";
 import pool from "../db";
 import IBookDto from "../interfaces/mailib/dto/IBookDto";
-import { IFantlabGetBookResponse } from "../interfaces/fantlab/IFantlabGetBookResponse";
+import { IFantlabGetWorkResponse } from "../interfaces/fantlab/IFantlabGetWorkResponse";
 import { FantlabSearchTypeEnum } from "../enums/fantlabSearchTypeEnum";
 import { addAuthor, getAuthorByFantlabId } from "./authorController";
 import IBookEntity from "../interfaces/mailib/entity/IBookEntity";
@@ -26,23 +30,43 @@ import { addOwner, removeOwnerByBookIdAndUserId } from "./ownerController";
 import { addReader, removeReaderByBookIdAndUserId } from "./readerController";
 import { getUserInSession } from "../utils/getUserInSession";
 import getFamilyUsersIdWhoDoesntHaveBook from "../sql/getFamilyUsersIdWhoDoesntHaveBook";
+import { parseBracketAutors } from "../utils/parseBracketAutor";
+import { removeBracketsContent } from "../utils/removeBracketsContent";
+import {
+  IFantlabGetEditionResponse,
+  Series,
+} from "../interfaces/fantlab/IFantlabGetEditionResponse";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
 
   const isWorks = (
     obj: IFantlabSearchResponse<
-      FantlabSearchTypeEnum.AUTHORS | FantlabSearchTypeEnum.WORKS
+      | FantlabSearchTypeEnum.AUTHORS
+      | FantlabSearchTypeEnum.WORKS
+      | FantlabSearchTypeEnum.EDITIONS
     >
   ): obj is IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS> => {
     return obj.type === FantlabSearchTypeEnum.WORKS;
+  };
+
+  const isEditions = (
+    obj: IFantlabSearchResponse<
+      | FantlabSearchTypeEnum.AUTHORS
+      | FantlabSearchTypeEnum.WORKS
+      | FantlabSearchTypeEnum.EDITIONS
+    >
+  ): obj is IFantlabSearchResponse<FantlabSearchTypeEnum.EDITIONS> => {
+    return obj.type === FantlabSearchTypeEnum.EDITIONS;
   };
 
   try {
     const response = await fetch(`${FANTLAB_SEARCH_MAIN}?q=` + q);
     const data: Array<
       IFantlabSearchResponse<
-        FantlabSearchTypeEnum.AUTHORS | FantlabSearchTypeEnum.WORKS
+        | FantlabSearchTypeEnum.AUTHORS
+        | FantlabSearchTypeEnum.WORKS
+        | FantlabSearchTypeEnum.EDITIONS
       >
     > = await response.json();
 
@@ -52,51 +76,88 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
     const books: IBookEntity[] = [];
     const worksGroup = data.find(isWorks);
 
+    const editions: IBookEntity[] = [];
+    const editionsGroup = data.find(isEditions);
+
     if (worksGroup?.matches?.length) {
-      worksGroup.matches
-        .filter((i) => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
-        .map((work) => {
-          const authors: IAuthorDto[] = [];
+      await Promise.all(
+        worksGroup.matches
+          .filter((i) => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
+          .map(async (work) => {
+            const authors: IAuthorDto[] = [];
 
-          for (let i = 1; i <= 5; i += 1) {
-            const keyId = `autor${i}_id` as keyof IFantlabWork;
-            const keyName = `autor${i}_rusname` as keyof IFantlabWork;
-            const id = work[keyId] as number;
-            const name = work[keyName] as string;
+            for (let i = 1; i <= 5; i += 1) {
+              const keyId = `autor${i}_id` as keyof IFantlabWork;
+              const keyName = `autor${i}_rusname` as keyof IFantlabWork;
+              const id = work[keyId] as number;
+              const name = work[keyName] as string;
 
-            if (id && name) {
-              authors.push({
-                id: id.toString(),
-                fantlab_id: id,
-                name,
-              });
+              if (id && name) {
+                authors.push({
+                  id: id.toString(),
+                  fantlab_id: id,
+                  name,
+                });
+              }
             }
-          }
 
-          books.push({
+            const response = await fetch(
+              FANTLAB_GET_WORK(work.work_id.toString())
+            );
+            const details: IFantlabGetWorkResponse = await response.json();
+
+            books.push({
+              id: undefined,
+              fantlab_id: work.work_id,
+              name: work.rusname,
+              description: "",
+              image_big: details.image,
+              image_small: details.image_preview,
+              authors,
+              genres: [
+                {
+                  id: "",
+                  name: work.name_show_im,
+                },
+              ],
+              cycles: [],
+              is_own_by_user: false,
+              is_read_by_user: false,
+              type: "fantlab_work",
+            });
+          })
+      );
+    }
+
+    if (editionsGroup?.matches?.length) {
+      await Promise.all(
+        editionsGroup.matches.map(async (edition) => {
+          const authors: IAuthorDto[] = parseBracketAutors(edition.autors);
+
+          const response = await fetch(
+            FANTLAB_GET_EDITION(edition.edition_id.toString())
+          );
+          const details: IFantlabGetEditionResponse = await response.json();
+
+          editions.push({
             id: undefined,
-            fantlab_id: work.work_id,
-            name: work.rusname,
+            fantlab_id: edition.edition_id.toString(),
+            name: removeBracketsContent(edition.name),
             description: "",
-            image_big: "",
-            image_small: work.pic_edition_id_auto
-              ? `https://fantlab.ru/images/editions/small/${work.pic_edition_id_auto}`
-              : "",
+            image_big: details.image_preview,
+            image_small: details.image,
             authors,
-            genres: [
-              {
-                id: "",
-                name: work.name_show_im,
-              },
-            ],
+            genres: [],
             cycles: [],
             is_own_by_user: false,
             is_read_by_user: false,
+            type: "fantlab_edition",
           });
-        });
+        })
+      );
     }
 
-    res.json(books);
+    res.json({ books, editions });
   } catch (error) {
     res.status(500).json({ error });
   }
@@ -104,7 +165,7 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
 
 const addBookFromOurDb = async (book: IBookDto) => {
   return await pool.query(
-    "INSERT INTO books(id, name, description, image_big, image_small, isbn_list, fantlab_id) values($1, $2, $3, $4, $5, $6, $7)",
+    "INSERT INTO books(id, name, description, image_big, image_small, isbn_list, fantlab_id, type) values($1, $2, $3, $4, $5, $6, $7, $8)",
     [
       book.id,
       book.name,
@@ -113,6 +174,7 @@ const addBookFromOurDb = async (book: IBookDto) => {
       book.image_small,
       book.isbn_list,
       book.fantlab_id,
+      book.type,
     ]
   );
 };
@@ -164,15 +226,21 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
     cycles,
     is_own_by_user: rows[0].is_own_by_user,
     is_read_by_user: rows[0].is_read_by_user,
+    type: rows[0].type,
   };
 
   return newBookEntity;
 };
 
-const getBookFromOurDbById = async (id: string, userId: string) => {
+const getBookFromOurDbById = async (
+  type: string,
+  id: string,
+  userId: string
+) => {
   const { rows } = await pool.query(`${getBookDetailsSql} b.id = $1`, [
     id,
     userId,
+    type,
   ]);
 
   if (rows.length === 0) return null;
@@ -181,12 +249,14 @@ const getBookFromOurDbById = async (id: string, userId: string) => {
 };
 
 const getBookFromOurDbByFantlabId = async (
+  type: string,
   fantlabId: string,
   userId: string
 ) => {
   const { rows } = await pool.query(`${getBookDetailsSql} b.fantlab_id = $1`, [
     fantlabId,
     userId,
+    type,
   ]);
 
   if (rows.length === 0) return null;
@@ -194,9 +264,9 @@ const getBookFromOurDbByFantlabId = async (
   return convertBookDtoToBookEntity(rows);
 };
 
-const getBookFromFantlab = async (id: string) => {
-  const response = await fetch(FANTLAB_GET_BOOK(id));
-  const data: IFantlabGetBookResponse = await response.json();
+const getBookWorkFromFantlab = async (id: string) => {
+  const response = await fetch(FANTLAB_GET_WORK(id));
+  const data: IFantlabGetWorkResponse = await response.json();
 
   const newBook: IBookDto = {
     id: uuid(),
@@ -206,6 +276,7 @@ const getBookFromFantlab = async (id: string) => {
     image_small: data.image_preview,
     image_big: data.image,
     isbn_list: data.editions_info?.isbn_list,
+    type: "fantlab_work",
   };
 
   await addBookFromOurDb(newBook);
@@ -247,6 +318,52 @@ const getBookFromFantlab = async (id: string) => {
     const cycles = data.work_root_saga.filter((i) => i.work_id);
     newBookEntity.cycles = await Promise.all(
       cycles.map((cycle) => checkAndSaveCycle(cycle, newBook))
+    );
+  } catch (e) {
+    console.log("Error adding cycles", e);
+  }
+
+  return newBookEntity;
+};
+
+const getBookEditionFromFantlab = async (id: string) => {
+  const response = await fetch(FANTLAB_GET_EDITION(id));
+  const data: IFantlabGetEditionResponse = await response.json();
+
+  const newBook: IBookDto = {
+    id: uuid(),
+    fantlab_id: data.edition_id.toString(),
+    name: data.edition_name,
+    description: data.description.replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1"),
+    image_small: data.image_preview,
+    image_big: data.image,
+    isbn_list: data.isbns.join(", "),
+    type: "fantlab_edition",
+  };
+
+  await addBookFromOurDb(newBook);
+
+  const newBookEntity: IBookEntity = {
+    ...newBook,
+    authors: [],
+    genres: [],
+    cycles: [],
+    is_own_by_user: false,
+    is_read_by_user: false,
+  };
+
+  try {
+    newBookEntity.authors = await Promise.all(
+      data.creators.authors.map((author) => checkAndSaveAuthor(author, newBook))
+    );
+  } catch (e) {
+    console.log("Error adding authors", e);
+  }
+
+  try {
+    const cycles = data.series.filter((i) => i.id);
+    newBookEntity.cycles = await Promise.all(
+      cycles.map((cycle) => checkAndSaveSerie(cycle, newBook))
     );
   } catch (e) {
     console.log("Error adding cycles", e);
@@ -322,28 +439,58 @@ const checkAndSaveCycle = async (cycle: IFantlabCycle, book: IBookDto) => {
   return cycleFromDb;
 };
 
-const getBookById = async (id: string, userId: string) => {
+const checkAndSaveSerie = async (cycle: Series, book: IBookDto) => {
+  let cycleFromDb = await getCycleByFantlabId(parseInt(cycle.id));
+
+  if (!cycleFromDb) {
+    cycleFromDb = {
+      id: uuid(),
+      name: cycle.name,
+      fantlab_id: parseInt(cycle.id),
+      type: cycle.type,
+    };
+
+    await addCycle(cycleFromDb);
+  }
+
+  await pool.query(
+    "INSERT INTO cycles_books(id, cycle_id, book_id) values($1, $2, $3)",
+    [uuid(), cycleFromDb.id, book.id]
+  );
+
+  return cycleFromDb;
+};
+
+const getBookById = async (type: string, id: string, userId: string) => {
   let book: IBookEntity | null = null;
 
   if (uuidValidate(id)) {
-    book = await getBookFromOurDbById(id, userId);
+    book = await getBookFromOurDbById(type, id, userId);
   } else {
-    book = await getBookFromOurDbByFantlabId(id, userId);
+    book = await getBookFromOurDbByFantlabId(type, id, userId);
   }
 
   return book;
 };
 
-const getBookByIdWithAddingIfNotExist = async (id: string, userId: string) => {
+const getBookByIdWithAddingIfNotExist = async (
+  id: string,
+  type: string,
+  userId: string
+) => {
   let book: IBookEntity | null = null;
 
   if (uuidValidate(id)) {
-    book = await getBookFromOurDbById(id, userId);
+    book = await getBookFromOurDbById(type, id, userId);
   } else {
-    book = await getBookFromOurDbByFantlabId(id, userId);
+    book = await getBookFromOurDbByFantlabId(type, id, userId);
 
     if (!book) {
-      book = await getBookFromFantlab(id);
+      if (type === "fantlab_work") {
+        book = await getBookWorkFromFantlab(id);
+      } else if (type === "fantlab_edition") {
+        book = await getBookEditionFromFantlab(id);
+      }
     }
   }
 
@@ -351,14 +498,14 @@ const getBookByIdWithAddingIfNotExist = async (id: string, userId: string) => {
 };
 
 const getBookByIdRequest = async (
-  req: Request<{ id: string }, {}, {}>,
+  req: Request<{ id: string; type: string }, {}, {}>,
   res: Response
 ) => {
   try {
-    const { id } = req.params;
+    const { id, type } = req.params;
     const user = getUserInSession(req, res);
 
-    const book = await getBookByIdWithAddingIfNotExist(id, user.id);
+    const book = await getBookByIdWithAddingIfNotExist(id, type, user.id);
 
     res.status(200).json(book);
   } catch (error) {
@@ -368,7 +515,7 @@ const getBookByIdRequest = async (
 
 const addBookInLibrary = async (
   req: Request<
-    { id: string },
+    { id: string; type: string },
     {},
     { owner_ids: string[]; reader_ids?: string[] }
   >,
@@ -380,19 +527,21 @@ const addBookInLibrary = async (
   }
 
   const { owner_ids, reader_ids } = req.body;
-  const { id } = req.params;
+  const { id, type } = req.params;
 
   try {
     // Пробегаемся по миссиву пользовтелей, которым надо добавить эту книгу во владение
     await Promise.all(
-      owner_ids.map((user_id) => addOwner({ id: uuid(), book_id: id, user_id }))
+      owner_ids.map((user_id) =>
+        addOwner({ id: uuid(), book_id: id, user_id, type })
+      )
     );
 
     // Если есть массив прочитавших, то побегаемся по миссиву id, которым надо добавить эту книгу в прочитанное
     if (reader_ids) {
       await Promise.all(
         reader_ids.map((user_id) =>
-          addReader({ id: uuid(), book_id: id, user_id })
+          addReader({ id: uuid(), book_id: id, user_id, type })
         )
       );
     }
@@ -404,7 +553,7 @@ const addBookInLibrary = async (
 };
 
 const removeBookFromLibrary = async (
-  req: Request<{ id: string }, {}, { owner_ids: string[] }>,
+  req: Request<{ id: string; type: string }, {}, { owner_ids: string[] }>,
   res: Response
 ) => {
   if (!checkPostParams(req, ["book_id", "owner_ids"])) {
@@ -413,10 +562,10 @@ const removeBookFromLibrary = async (
   }
 
   const { owner_ids } = req.body;
-  const { id } = req.params;
+  const { id, type } = req.params;
 
   const user = getUserInSession(req, res);
-  const book = await getBookById(id, user.id);
+  const book = await getBookById(type, id, user.id);
 
   try {
     await removeOwnerByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
@@ -437,12 +586,12 @@ const getUserLibrary = async (req: Request<{}, {}, {}>, res: Response) => {
 };
 
 const getUsersIdWhoDoesntHaveBook = async (
-  req: Request<{ id: string }, {}, {}>,
+  req: Request<{ id: string; type: string }, {}, {}>,
   res: Response
 ) => {
-  const { id } = req.params;
+  const { id, type } = req.params;
   const user = getUserInSession(req, res);
-  const book = await getBookById(id, user.id);
+  const book = await getBookById(type, id, user.id);
 
   const { rows } = await pool.query(getFamilyUsersIdWhoDoesntHaveBook, [
     user.family_id,

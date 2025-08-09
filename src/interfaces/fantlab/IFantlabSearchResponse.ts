@@ -1,5 +1,6 @@
 import { FantlabSearchTypeEnum } from "./../../enums/fantlabSearchTypeEnum";
 import { IFantlabAuthor } from "./IFantlabAuthor";
+import { IFantlabEdition } from "./IFantlabEdition";
 import { IFantlabWork } from "./IFantlabWork";
 
 export interface IFantlabSearchResponse<T extends FantlabSearchTypeEnum> {
@@ -8,5 +9,7 @@ export interface IFantlabSearchResponse<T extends FantlabSearchTypeEnum> {
     ? IFantlabAuthor[]
     : T extends FantlabSearchTypeEnum.WORKS
     ? IFantlabWork[]
+    : T extends FantlabSearchTypeEnum.EDITIONS
+    ? IFantlabEdition[]
     : any;
 }

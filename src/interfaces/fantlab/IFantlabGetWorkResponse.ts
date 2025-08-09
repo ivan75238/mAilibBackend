@@ -1,7 +1,7 @@
 import { IFantlabCycle } from "./IFantlabCycle";
 import { IFantlabGenre } from "./IFantlabGenre";
 
-export interface IFantlabGetBookResponse {
+export interface IFantlabGetWorkResponse {
   work_id: number;
   work_name: string;
   authors: {

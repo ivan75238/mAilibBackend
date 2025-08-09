@@ -3,14 +3,14 @@ import IReaderDto from "../interfaces/mailib/dto/IReaderDto";
 
 const addReader = async (reader: IReaderDto) => {
   await pool.query(
-    `INSERT INTO readers(id, book_id, user_id)
-     SELECT $1, $2, $3 
+    `INSERT INTO readers(id, book_id, user_id, type)
+     SELECT $1, $2, $3 , $4
      WHERE NOT EXISTS (
         SELECT 1 
         FROM readers 
         WHERE book_id = $2 AND user_id = $3
     )`,
-    [reader.id, reader.book_id, reader.user_id]
+    [reader.id, reader.book_id, reader.user_id, reader.type]
   );
 };
 

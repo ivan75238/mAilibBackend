@@ -10,4 +10,5 @@ export default interface IBookEntity extends Omit<IBookDto, "id"> {
   cycles: ICycleDto[];
   is_own_by_user: boolean;
   is_read_by_user: boolean;
+  type: 'fantlab_work' | 'fantlab_edition' | 'inner_db_work'
 }

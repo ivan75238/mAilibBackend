@@ -3,14 +3,14 @@ import IOwnerDto from "../interfaces/mailib/dto/IOwnerDto";
 
 const addOwner = async (owner: IOwnerDto) => {
   await pool.query(
-    `INSERT INTO owners(id, book_id, user_id)
-     SELECT $1, $2, $3 
+    `INSERT INTO owners(id, book_id, user_id, type)
+     SELECT $1, $2, $3, $4
      WHERE NOT EXISTS (
         SELECT 1 
         FROM owners 
         WHERE book_id = $2 AND user_id = $3
     )`,
-    [owner.id, owner.book_id, owner.user_id]
+    [owner.id, owner.book_id, owner.user_id, owner.type],
   );
 };
 
