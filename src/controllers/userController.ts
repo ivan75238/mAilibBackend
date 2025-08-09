@@ -3,16 +3,17 @@ import pool from "../db";
 import IUserDto from "../interfaces/mailib/dto/IUserDto";
 
 const getCurrentUser = async (req: Request, res: Response) => {
-  const user = req.session.user;
+  //@ts-ignore
+  const userId = req.userId;
 
-  if (!user) {
+  if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   const { rows } = await pool.query<IUserDto>(
     "SELECT * FROM users WHERE id = $1",
-    [user.id]
+    [userId]
   );
 
   req.session.user = rows[0];

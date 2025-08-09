@@ -143,7 +143,7 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
   const cycles: ICycleDto[] = [];
 
   Object.values(groupBy(rows, "cycle_id")).map((item) => {
-    if (item.length) {
+    if (item.length && item[0].cycle_id && item[0].cycle_name) {
       cycles.push({
         id: item[0].cycle_id,
         name: item[0].cycle_name,
@@ -195,36 +195,40 @@ const getBookFromOurDbByFantlabId = async (
 };
 
 const getBookFromFantlab = async (id: string) => {
+  const response = await fetch(FANTLAB_GET_BOOK(id));
+  const data: IFantlabGetBookResponse = await response.json();
+
+  const newBook: IBookDto = {
+    id: uuid(),
+    fantlab_id: data.work_id.toString(),
+    name: data.work_name,
+    description: data.work_description,
+    image_small: data.image_preview,
+    image_big: data.image,
+    isbn_list: data.editions_info?.isbn_list,
+  };
+
+  await addBookFromOurDb(newBook);
+
+  const newBookEntity: IBookEntity = {
+    ...newBook,
+    authors: [],
+    genres: [],
+    cycles: [],
+    is_own_by_user: false,
+    is_read_by_user: false,
+  };
+
   try {
-    const response = await fetch(FANTLAB_GET_BOOK(id));
-    const data: IFantlabGetBookResponse = await response.json();
-
-    const newBook: IBookDto = {
-      id: uuid(),
-      fantlab_id: data.work_id.toString(),
-      name: data.work_name,
-      description: data.work_description,
-      image_small: data.image_preview,
-      image_big: data.image,
-      isbn_list: data.editions_info?.isbn_list,
-    };
-
-    await addBookFromOurDb(newBook);
-
-    const newBookEntity: IBookEntity = {
-      ...newBook,
-      authors: [],
-      genres: [],
-      cycles: [],
-      is_own_by_user: false,
-      is_read_by_user: false,
-    };
-
     newBookEntity.authors = await Promise.all(
       data.authors.map((author) => checkAndSaveAuthor(author, newBook))
     );
+  } catch (e) {
+    console.log("Error adding authors", e);
+  }
 
-    const genresGroup = data.classificatory.genre_group.find(
+  try {
+    const genresGroup = data.classificatory?.genre_group?.find(
       (i) => i.label.toUpperCase().indexOf("ЖАНР") > -1
     );
 
@@ -235,15 +239,20 @@ const getBookFromFantlab = async (id: string) => {
         )
       );
     }
-
-    newBookEntity.cycles = await Promise.all(
-      data.work_root_saga.map((cycle) => checkAndSaveCycle(cycle, newBook))
-    );
-
-    return newBookEntity;
   } catch (e) {
-    return null;
+    console.log("Error adding genres", e);
   }
+
+  try {
+    const cycles = data.work_root_saga.filter((i) => i.work_id);
+    newBookEntity.cycles = await Promise.all(
+      cycles.map((cycle) => checkAndSaveCycle(cycle, newBook))
+    );
+  } catch (e) {
+    console.log("Error adding cycles", e);
+  }
+
+  return newBookEntity;
 };
 
 const checkAndSaveAuthor = async (
@@ -298,6 +307,8 @@ const checkAndSaveCycle = async (cycle: IFantlabCycle, book: IBookDto) => {
     cycleFromDb = {
       id: uuid(),
       name: cycle.work_name,
+      fantlab_id: cycle.work_id,
+      type: cycle.work_type,
     };
 
     await addCycle(cycleFromDb);
@@ -312,6 +323,18 @@ const checkAndSaveCycle = async (cycle: IFantlabCycle, book: IBookDto) => {
 };
 
 const getBookById = async (id: string, userId: string) => {
+  let book: IBookEntity | null = null;
+
+  if (uuidValidate(id)) {
+    book = await getBookFromOurDbById(id, userId);
+  } else {
+    book = await getBookFromOurDbByFantlabId(id, userId);
+  }
+
+  return book;
+};
+
+const getBookByIdWithAddingIfNotExist = async (id: string, userId: string) => {
   let book: IBookEntity | null = null;
 
   if (uuidValidate(id)) {
@@ -335,7 +358,7 @@ const getBookByIdRequest = async (
     const { id } = req.params;
     const user = getUserInSession(req, res);
 
-    const book = await getBookById(id, user.id);
+    const book = await getBookByIdWithAddingIfNotExist(id, user.id);
 
     res.status(200).json(book);
   } catch (error) {
