@@ -12,17 +12,31 @@ import pool from "../db";
 import IBookDto from "../interfaces/mailib/dto/IBookDto";
 import { IFantlabGetWorkResponse } from "../interfaces/fantlab/IFantlabGetWorkResponse";
 import { FantlabSearchTypeEnum } from "../enums/fantlabSearchTypeEnum";
-import { addAuthor, getAuthorByFantlabId } from "./authorController";
+import {
+  addAuthor,
+  getAuthorByFantlabId,
+  getAuthorById,
+  getAutorsByBookId,
+  getAutorsByName,
+} from "./authorController";
 import IBookEntity from "../interfaces/mailib/entity/IBookEntity";
 import { IFantlabGenre } from "../interfaces/fantlab/IFantlabGenre";
 import { flatGenres } from "../utils/flatGenres";
-import { addGenres, getGenresByFantlabId } from "./genreController";
+import {
+  addGenres,
+  getGenresByFantlabId,
+  getGenresByName,
+} from "./genreController";
 import IGenreDto from "../interfaces/mailib/dto/IGenreDto";
 import IAuthorDto from "../interfaces/mailib/dto/IAuthorDto";
 import getBookDetailsSql from "../sql/getBookDetailsSql";
 import getUserLibrarySql from "../sql/getUserLibrarySql";
 import { IFantlabWork } from "../interfaces/fantlab/IFantlabWork";
-import { addCycle, getCycleByFantlabId } from "./cycleController";
+import {
+  addCycle,
+  getCycleByFantlabId,
+  getCycleByName,
+} from "./cycleController";
 import { IFantlabCycle } from "../interfaces/fantlab/IFantlabCycle";
 import ICycleDto from "../interfaces/mailib/dto/ICycleDto";
 import { checkPostParams } from "../utils/checkPostParams";
@@ -78,6 +92,8 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
 
     const editions: IBookEntity[] = [];
     const editionsGroup = data.find(isEditions);
+
+    const inner: IBookEntity[] = [];
 
     if (worksGroup?.matches?.length) {
       await Promise.all(
@@ -157,7 +173,33 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
       );
     }
 
-    res.json({ books, editions });
+    //Поиск в нашей библиотеке
+    const { rows } = await pool.query<IBookDto>(
+      "SELECT * FROM books WHERE name ILIKE $1;",
+      [`%${q}%`]
+    );
+
+    await Promise.all(
+      rows.map(async (row) => {
+        const authors = await getAutorsByBookId(row.id);
+        inner.push({
+          id: row.id,
+          fantlab_id: row.fantlab_id,
+          name: row.name,
+          description: "",
+          image_big: row.image_big,
+          image_small: row.image_small,
+          authors: authors || [],
+          genres: [],
+          cycles: [],
+          is_own_by_user: false,
+          is_read_by_user: false,
+          type: row.type,
+        });
+      })
+    );
+
+    res.json({ books, editions, inner });
   } catch (error) {
     res.status(500).json({ error });
   }
@@ -373,10 +415,13 @@ const getBookEditionFromFantlab = async (id: string) => {
 };
 
 const checkAndSaveAuthor = async (
-  author: { id: number; name: string },
+  author: { id?: number; name: string },
   book: IBookDto
 ) => {
-  let authorFromDb = await getAuthorByFantlabId(author.id);
+  let authorFromDb;
+  if (author.id) {
+    authorFromDb = await getAuthorByFantlabId(author.id);
+  }
 
   if (!authorFromDb) {
     authorFromDb = {
@@ -602,6 +647,154 @@ const getUsersIdWhoDoesntHaveBook = async (
   res.json(rows.map((i) => i.user_id));
 };
 
+const createBookInDb = async (
+  req: Request<
+    {},
+    {},
+    {
+      name: string;
+      description?: string;
+      image?: string;
+      isbn?: string;
+      authors: { id?: string; name?: string }[];
+      genres: { id?: string; name?: string }[];
+      cycles?: { id?: string; name?: string }[];
+    }
+  >,
+  res: Response
+) => {
+  if (!checkPostParams(req, ["name", "authors", "genres"])) {
+    res.status(400).json({ error: "Invalid data" });
+    return;
+  }
+
+  const { name, description, image, isbn, authors, genres, cycles } = req.body;
+
+  try {
+    const newBook: IBookDto = {
+      id: uuid(),
+      fantlab_id: "",
+      name,
+      description,
+      image_small: image,
+      image_big: image,
+      isbn_list: isbn,
+      type: "inner_db_work",
+    };
+
+    await addBookFromOurDb(newBook);
+
+    await Promise.all(
+      authors.map(async (author) => {
+        if (author.id) {
+          await pool.query(
+            "INSERT INTO authors_books(id, author_id, book_id) values($1, $2, $3)",
+            [uuid(), author.id, newBook.id]
+          );
+        } else {
+          if (author.name) {
+            const search = await getAutorsByName(author.name);
+
+            if (!!search) {
+              await pool.query(
+                "INSERT INTO authors_books(id, author_id, book_id) values($1, $2, $3)",
+                [uuid(), search.id, newBook.id]
+              );
+            } else {
+              const newAuthor = {
+                id: uuid(),
+                fantlab_id: undefined,
+                name: author.name || "",
+              };
+
+              await addAuthor(newAuthor);
+              await pool.query(
+                "INSERT INTO authors_books(id, author_id, book_id) values($1, $2, $3)",
+                [uuid(), newAuthor.id, newBook.id]
+              );
+            }
+          }
+        }
+      })
+    );
+
+    await Promise.all(
+      genres.map(async (genre) => {
+        if (genre.id) {
+          await pool.query(
+            "INSERT INTO genres_books(id, genre_id, book_id) values($1, $2, $3)",
+            [uuid(), genre.id, newBook.id]
+          );
+        } else {
+          if (genre.name) {
+            const search = await getGenresByName(genre.name);
+
+            if (!!search) {
+              await pool.query(
+                "INSERT INTO genres_books(id, genre_id, book_id) values($1, $2, $3)",
+                [uuid(), search.id, newBook.id]
+              );
+            } else {
+              const newGenre = {
+                id: uuid(),
+                fantlab_id: undefined,
+                name: genre.name || "",
+              };
+
+              await addGenres(newGenre);
+              await pool.query(
+                "INSERT INTO genres_books(id, genre_id, book_id) values($1, $2, $3)",
+                [uuid(), newGenre.id, newBook.id]
+              );
+            }
+          }
+        }
+      })
+    );
+
+    if (cycles) {
+      await Promise.all(
+        cycles.map(async (cycle) => {
+          if (cycle.id) {
+            await pool.query(
+              "INSERT INTO cycles_books(id, cycle_id, book_id) values($1, $2, $3)",
+              [uuid(), cycle.id, newBook.id]
+            );
+          } else {
+            if (cycle.name) {
+              const search = await getCycleByName(cycle.name);
+
+              if (!!search) {
+                await pool.query(
+                  "INSERT INTO cycles_books(id, cycle_id, book_id) values($1, $2, $3)",
+                  [uuid(), search.id, newBook.id]
+                );
+              } else {
+                const newCycle = {
+                  id: uuid(),
+                  fantlab_id: undefined,
+                  name: cycle.name || "",
+                  type: "цикл",
+                };
+
+                await addCycle(newCycle);
+                await pool.query(
+                  "INSERT INTO cycles_books(id, cycle_id, book_id) values($1, $2, $3)",
+                  [uuid(), newCycle.id, newBook.id]
+                );
+              }
+            }
+          }
+        })
+      );
+    }
+
+    res.json({ bookId: newBook.id });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
 export default {
   search,
   getBookByIdRequest,
@@ -609,4 +802,5 @@ export default {
   removeBookFromLibrary,
   getUserLibrary,
   getUsersIdWhoDoesntHaveBook,
+  createBookInDb,
 };

@@ -1,10 +1,11 @@
+import { Request, Response } from "express";
 import pool from "../db";
 import IGenreDto from "../interfaces/mailib/dto/IGenreDto";
 
-const addGenres = async (book: IGenreDto) => {
+const addGenres = async (genre: IGenreDto) => {
   await pool.query(
     "INSERT INTO genres(id, fantlab_id, name) values($1, $2, $3)",
-    [book.id, book.fantlab_id, book.name]
+    [genre.id, genre.fantlab_id, genre.name]
   );
 };
 
@@ -24,4 +25,19 @@ const getGenresByFantlabId = async (fantlabId: number) => {
   return rows.length > 0 ? rows[0] : null;
 };
 
-export { addGenres, getGenresById, getGenresByFantlabId };
+const getGenresByName = async (name: string) => {
+  const { rows } = await pool.query<IGenreDto>(
+    "SELECT * FROM genres WHERE name ILIKE $1;",
+    [`${name}%`]
+  );
+  return rows.length > 0 ? rows[0] : null;
+};
+
+const getAllGenres = async (req: Request, res: Response) => {
+  const { rows } = await pool.query<IGenreDto>("SELECT * FROM genres ", []);
+
+  res.json(rows);
+};
+
+export { addGenres, getGenresById, getGenresByFantlabId, getGenresByName };
+export default { getAllGenres };

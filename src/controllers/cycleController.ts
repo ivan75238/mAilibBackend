@@ -1,3 +1,4 @@
+import { Request, Response } from "express";
 import pool from "../db";
 import ICycleDto from "../interfaces/mailib/dto/ICycleDto";
 
@@ -24,4 +25,19 @@ const getCycleByFantlabId = async (fantlabId: number) => {
   return rows.length > 0 ? rows[0] : null;
 };
 
-export { addCycle, getCycleById, getCycleByFantlabId };
+const getCycleByName = async (name: string) => {
+  const { rows } = await pool.query<ICycleDto>(
+    "SELECT * FROM cycles WHERE name ILIKE $1;",
+    [`${name}%`]
+  );
+  return rows.length > 0 ? rows[0] : null;
+};
+
+const getAllCycles = async (req: Request, res: Response) => {
+  const { rows } = await pool.query<ICycleDto>("SELECT * FROM cycles ", []);
+
+  res.json(rows);
+};
+
+export { addCycle, getCycleById, getCycleByFantlabId, getCycleByName };
+export default { getAllCycles };

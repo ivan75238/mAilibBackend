@@ -5,6 +5,9 @@ import bearerToken from "express-bearer-token";
 import dotenv from "dotenv";
 import mainRouter from "./routes/users";
 import bookRouter from "./routes/books";
+import genresRouter from "./routes/genres";
+import authorsRouter from "./routes/authors";
+import cyclesRouter from "./routes/cycles";
 import familyRouter from "./routes/family";
 import pool from "./db";
 import authController from "./controllers/authController";
@@ -18,8 +21,8 @@ const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
   "https://mailib.ru",
-  "http://localhost:3000", 
-  "http://localhost:3001", 
+  "http://localhost:3000",
+  "http://localhost:3001",
 ];
 
 app.use(
@@ -55,6 +58,9 @@ app.post("/changePassword", authController.changePassword);
 app.use("/users", authMiddleware, mainRouter);
 app.use("/books", authMiddleware, bookRouter);
 app.use("/family", authMiddleware, familyRouter);
+app.use("/authors", authMiddleware, authorsRouter);
+app.use("/genres", authMiddleware, genresRouter);
+app.use("/cycles", authMiddleware, cyclesRouter);
 
 // Роут для тестирования БД
 app.get("/test-db", async (req, res) => {
