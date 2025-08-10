@@ -50,6 +50,7 @@ import {
   IFantlabGetEditionResponse,
   Series,
 } from "../interfaces/fantlab/IFantlabGetEditionResponse";
+import getFamilyUsersIdWhoDoesntHaveInnerBook from "../sql/getFamilyUsersIdWhoDoesntHaveInnerBook";
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -638,11 +639,17 @@ const getUsersIdWhoDoesntHaveBook = async (
   const user = getUserInSession(req, res);
   const book = await getBookById(type, id, user.id);
 
-  const { rows } = await pool.query(getFamilyUsersIdWhoDoesntHaveBook, [
-    user.family_id,
-    book?.id,
-    book?.fantlab_id,
-  ]);
+  const array =
+    type === "inner_db_work"
+      ? [user.family_id, book?.id]
+      : [user.family_id, book?.id, book?.fantlab_id];
+
+  const { rows } = await pool.query(
+    type === "inner_db_work"
+      ? getFamilyUsersIdWhoDoesntHaveInnerBook
+      : getFamilyUsersIdWhoDoesntHaveBook,
+    array
+  );
 
   res.json(rows.map((i) => i.user_id));
 };
