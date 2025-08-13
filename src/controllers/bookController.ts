@@ -51,6 +51,28 @@ import {
   Series,
 } from "../interfaces/fantlab/IFantlabGetEditionResponse";
 import getFamilyUsersIdWhoDoesntHaveInnerBook from "../sql/getFamilyUsersIdWhoDoesntHaveInnerBook";
+import { IFantlabAuthor } from "../interfaces/fantlab/IFantlabAuthor";
+import { IFantlabEdition } from "../interfaces/fantlab/IFantlabEdition";
+import searchBook from "../sql/searchBook";
+
+interface ISearchResult {
+  books: IBookEntity[];
+  editions: IBookEntity[];
+  inner: IBookEntity[];
+}
+
+const removeDuplicatesFromInner = (data: ISearchResult): ISearchResult => {
+  // Собираем все fantlab_id из books и editions
+  const existingIds = new Set<string | number | undefined>();
+
+  data.books.forEach((item) => existingIds.add(item.fantlab_id));
+  data.editions.forEach((item) => existingIds.add(item.fantlab_id));
+
+  // Фильтруем inner, оставляя только те элементы, которых нет в других массивах
+  data.inner = data.inner.filter((item) => !existingIds.has(item.fantlab_id));
+
+  return data;
+};
 
 const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   const { q } = req.query;
@@ -77,22 +99,46 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
 
   try {
     const response = await fetch(`${FANTLAB_SEARCH_MAIN}?q=` + q);
-    const data: Array<
-      IFantlabSearchResponse<
-        | FantlabSearchTypeEnum.AUTHORS
-        | FantlabSearchTypeEnum.WORKS
-        | FantlabSearchTypeEnum.EDITIONS
-      >
-    > = await response.json();
+    const responseJson = await response.json();
+    let data: Array<
+      | IFantlabSearchResponse<
+          | FantlabSearchTypeEnum.AUTHORS
+          | FantlabSearchTypeEnum.WORKS
+          | FantlabSearchTypeEnum.EDITIONS
+        >
+      | IFantlabAuthor
+      | IFantlabWork
+      | IFantlabEdition
+    > = [];
+
+    if (Array.isArray(responseJson)) {
+      data = responseJson;
+    } else if (responseJson.matches?.length) {
+      data = responseJson.matches;
+    }
 
     // 1, 3, 8, 13, 17, 41, 42, 43, - id типов, которые пропускаем
     // взято из https://api.fantlab.ru/config.json
 
     const books: IBookEntity[] = [];
-    const worksGroup = data.find(isWorks);
+    const worksGroup = data.find((i) =>
+      isWorks(i as IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS>)
+    ) as IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS>;
 
     const editions: IBookEntity[] = [];
-    const editionsGroup = data.find(isEditions);
+    let editionsGroup = data.find((i) =>
+      isEditions(i as IFantlabSearchResponse<FantlabSearchTypeEnum.EDITIONS>)
+    ) as IFantlabSearchResponse<FantlabSearchTypeEnum.EDITIONS>;
+    const editionMatchItems = data.filter(
+      (i) => !!(i as IFantlabEdition).edition_id
+    ) as IFantlabEdition[];
+
+    if (!editionsGroup && editionMatchItems.length) {
+      editionsGroup = {
+        type: FantlabSearchTypeEnum.EDITIONS,
+        matches: editionMatchItems,
+      };
+    }
 
     const inner: IBookEntity[] = [];
 
@@ -175,10 +221,7 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
     }
 
     //Поиск в нашей библиотеке
-    const { rows } = await pool.query<IBookDto>(
-      "SELECT * FROM books WHERE name ILIKE $1;",
-      [`%${q}%`]
-    );
+    const { rows } = await pool.query<IBookDto>(searchBook, [q]);
 
     await Promise.all(
       rows.map(async (row) => {
@@ -200,7 +243,7 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
       })
     );
 
-    res.json({ books, editions, inner });
+    res.json(removeDuplicatesFromInner({ books, editions, inner }));
   } catch (error) {
     res.status(500).json({ error });
   }

@@ -1,34 +1,33 @@
 export default `WITH family_members AS (
-    SELECT u.id::text AS member_id, 
-           u.first_name, 
-           u.last_name
+    SELECT u.id::text AS member_id, u.first_name, u.last_name
     FROM users u
     WHERE u.family_id = (SELECT family_id FROM users WHERE id = $1)
     OR u.id = $1
 ),
+-- Все книги семьи (всех типов) с учетом связи по id ИЛИ fantlab_id
 family_books AS (
     SELECT DISTINCT b.id, b.name, b.fantlab_id, b.type
     FROM books b
-    JOIN owners o ON b.id = o.book_id OR b.fantlab_id = o.book_id
+    JOIN owners o ON (b.id = o.book_id OR b.fantlab_id = o.book_id)
     JOIN family_members fm ON o.user_id = fm.member_id
 ),
--- Все возможные связи книг (по id и fantlab_id)
-book_connections AS (
-    SELECT id AS book_id, id AS original_book_id, fantlab_id FROM books
-    UNION
-    SELECT fantlab_id AS book_id, id AS original_book_id, fantlab_id FROM books WHERE fantlab_id IS NOT NULL
-),
--- Все чтения членов семьи
+-- Все чтения с правильными связями
 all_readings AS (
     SELECT 
+        r.id AS reading_id,
         r.book_id,
         r.user_id,
         r.created_at,
-        bc.original_book_id,
-        bc.fantlab_id
+        fb.id AS original_book_id
     FROM readers r
-    JOIN book_connections bc ON r.book_id = bc.book_id
     JOIN family_members fm ON r.user_id = fm.member_id
+    JOIN family_books fb ON (
+        -- Для fantlab-книг связь по fantlab_id
+        (fb.type IN ('fantlab_work', 'fantlab_edition') AND r.book_id = fb.fantlab_id)
+        OR
+        -- Для остальных книг связь по id
+        (fb.type NOT IN ('fantlab_work', 'fantlab_edition') AND r.book_id = fb.id)
+    )
 )
 SELECT 
     fb.id,
@@ -42,14 +41,19 @@ SELECT
                 'reader_id', ar.user_id,
                 'reader_name', fm.first_name || ' ' || fm.last_name,
                 'read_date', ar.created_at
-            ) ORDER BY ar.created_at DESC
+            )
         )
-        FROM all_readings ar
-        JOIN family_members fm ON ar.user_id = fm.member_id
-        WHERE ar.original_book_id = fb.id OR ar.fantlab_id = fb.fantlab_id),
+        FROM (
+            SELECT DISTINCT ON (user_id) 
+                user_id, 
+                created_at
+            FROM all_readings 
+            WHERE original_book_id = fb.id
+            ORDER BY user_id, created_at DESC
+        ) ar
+        JOIN family_members fm ON ar.user_id = fm.member_id),
         '[]'::json
     ) AS readers_info,
-    -- Информация об авторах
     COALESCE(
         (SELECT json_agg(
             json_build_object(
@@ -64,7 +68,6 @@ SELECT
         WHERE ab.book_id = fb.id),
         '[]'::json
     ) AS authors_info,
-    -- Информация о жанрах
     COALESCE(
         (SELECT json_agg(
             json_build_object(
@@ -79,6 +82,7 @@ SELECT
         '[]'::json
     ) AS genres_info
 FROM family_books fb
-LEFT JOIN all_readings ar ON (ar.original_book_id = fb.id OR ar.fantlab_id = fb.fantlab_id)
+LEFT JOIN all_readings ar ON ar.original_book_id = fb.id
 GROUP BY fb.id, fb.name, fb.fantlab_id, fb.type
-ORDER BY fb.name;`;
+ORDER BY fb.name;
+`;
