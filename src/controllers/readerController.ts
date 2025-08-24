@@ -29,7 +29,7 @@ const removeReaderByBookIdAndUserId = async (
   userIds: string[]
 ) => {
   await pool.query(
-    "DELETE FROM readers WHERE book_id = (id = $1 OR id = $2) AND user_id = ANY($3)",
+    "DELETE FROM readers WHERE (book_id = $1 OR book_id = $2) AND user_id = ANY($3)",
     [bookId, fantlabBookId, userIds]
   );
 };

@@ -54,6 +54,9 @@ import getFamilyUsersIdWhoDoesntHaveInnerBook from "../sql/getFamilyUsersIdWhoDo
 import { IFantlabAuthor } from "../interfaces/fantlab/IFantlabAuthor";
 import { IFantlabEdition } from "../interfaces/fantlab/IFantlabEdition";
 import searchBook from "../sql/searchBook";
+import { clearDescription } from "../utils/clearDescription";
+import getFamilyUsersIdWhoDoesntReadInnerBook from "../sql/getFamilyUsersIdWhoDoesntReadInnerBook";
+import getFamilyUsersIdWhoDoesntReadBook from "../sql/getFamilyUsersIdWhoDoesntReadBook";
 
 interface ISearchResult {
   books: IBookEntity[];
@@ -302,7 +305,7 @@ const convertBookDtoToBookEntity = (rows: any[]) => {
   const newBookEntity: IBookEntity = {
     id: rows[0].id,
     name: rows[0].name,
-    description: rows[0].description,
+    description: clearDescription(rows[0].description),
     image_big: rows[0].image_big,
     image_small: rows[0].image_small,
     isbn_list: rows[0].isbn_list,
@@ -358,7 +361,7 @@ const getBookWorkFromFantlab = async (id: string) => {
     id: uuid(),
     fantlab_id: data.work_id.toString(),
     name: data.work_name,
-    description: data.work_description,
+    description: clearDescription(data.work_description),
     image_small: data.image_preview,
     image_big: data.image,
     isbn_list: data.editions_info?.isbn_list,
@@ -420,7 +423,7 @@ const getBookEditionFromFantlab = async (id: string) => {
     id: uuid(),
     fantlab_id: data.edition_id.toString(),
     name: data.edition_name,
-    description: data.description.replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1"),
+    description: clearDescription(data.description),
     image_small: data.image_preview,
     image_big: data.image,
     isbn_list: data.isbns.join(", "),
@@ -610,7 +613,7 @@ const addBookInLibrary = async (
   >,
   res: Response
 ) => {
-  if (!checkPostParams(req, ["book_id", "owner_ids", "reader_ids"])) {
+  if (!checkPostParams(req, ["book_id", "type", "owner_ids", "reader_ids"])) {
     res.status(400).json({ error: "Invalid data" });
     return;
   }
@@ -641,11 +644,64 @@ const addBookInLibrary = async (
   }
 };
 
+const markAsRead = async (
+  req: Request<{ id: string; type: string }, {}, { reader_ids: string[] }>,
+  res: Response
+) => {
+  if (!checkPostParams(req, ["book_id", "type", "reader_ids"])) {
+    res.status(400).json({ error: "Invalid data" });
+    return;
+  }
+
+  const { reader_ids } = req.body;
+  const { id, type } = req.params;
+
+  try {
+    await Promise.all(
+      reader_ids.map((user_id) =>
+        addReader({ id: uuid(), book_id: id, user_id, type })
+      )
+    );
+
+    res.json({ message: "Book was marked" });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
+const removeMark = async (
+  req: Request<{ id: string; type: string }, {}, { reader_ids: string[] }>,
+  res: Response
+) => {
+  if (!checkPostParams(req, ["id", "type", "reader_ids"])) {
+    res.status(400).json({ error: "Invalid data" });
+    return;
+  }
+
+  const { reader_ids } = req.body;
+  const { id, type } = req.params;
+
+  const user = getUserInSession(req, res);
+  const book = await getBookById(type, id, user.id);
+
+  try {
+    await removeReaderByBookIdAndUserId(
+      id,
+      book?.fantlab_id || "",
+      reader_ids
+    );
+
+    res.json({ message: "Book was unmarked" });
+  } catch (error) {
+    res.status(500).json({ error });
+  }
+};
+
 const removeBookFromLibrary = async (
   req: Request<{ id: string; type: string }, {}, { owner_ids: string[] }>,
   res: Response
 ) => {
-  if (!checkPostParams(req, ["book_id", "owner_ids"])) {
+  if (!checkPostParams(req, ["id", "type", "owner_ids"])) {
     res.status(400).json({ error: "Invalid data" });
     return;
   }
@@ -657,8 +713,8 @@ const removeBookFromLibrary = async (
   const book = await getBookById(type, id, user.id);
 
   try {
-    await removeOwnerByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
     await removeReaderByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
+    await removeOwnerByBookIdAndUserId(id, book?.fantlab_id || "", owner_ids);
 
     res.json({ message: "Book was deleted" });
   } catch (error) {
@@ -691,6 +747,29 @@ const getUsersIdWhoDoesntHaveBook = async (
     type === "inner_db_work"
       ? getFamilyUsersIdWhoDoesntHaveInnerBook
       : getFamilyUsersIdWhoDoesntHaveBook,
+    array
+  );
+
+  res.json(rows.map((i) => i.user_id));
+};
+
+const getUsersIdWhoDoesntReadBook = async (
+  req: Request<{ id: string; type: string }, {}, {}>,
+  res: Response
+) => {
+  const { id, type } = req.params;
+  const user = getUserInSession(req, res);
+  const book = await getBookById(type, id, user.id);
+
+  const array =
+    type === "inner_db_work"
+      ? [user.family_id, book?.id]
+      : [user.family_id, book?.id, book?.fantlab_id];
+
+  const { rows } = await pool.query(
+    type === "inner_db_work"
+      ? getFamilyUsersIdWhoDoesntReadInnerBook
+      : getFamilyUsersIdWhoDoesntReadBook,
     array
   );
 
@@ -849,8 +928,11 @@ export default {
   search,
   getBookByIdRequest,
   addBookInLibrary,
+  markAsRead,
   removeBookFromLibrary,
+  removeMark,
   getUserLibrary,
   getUsersIdWhoDoesntHaveBook,
+  getUsersIdWhoDoesntReadBook,
   createBookInDb,
 };

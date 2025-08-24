@@ -10,7 +10,7 @@ const addOwner = async (owner: IOwnerDto) => {
         FROM owners 
         WHERE book_id = $2 AND user_id = $3
     )`,
-    [owner.id, owner.book_id, owner.user_id, owner.type],
+    [owner.id, owner.book_id, owner.user_id, owner.type]
   );
 };
 
@@ -29,7 +29,7 @@ const removeOwnerByBookIdAndUserId = async (
   userIds: string[]
 ) => {
   await pool.query(
-    "DELETE FROM owners WHERE book_id = (id = $1 OR id = $2) AND user_id = ANY($3)",
+    "DELETE FROM owners WHERE (book_id = $1 OR book_id = $2) AND user_id = ANY($3)",
     [bookId, fantlabBookId, userIds]
   );
 };
