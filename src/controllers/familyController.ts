@@ -37,6 +37,11 @@ const create = async (req: Request, res: Response) => {
 const get = async (req: Request, res: Response) => {
   const user = getUserInSession(req, res);
 
+  if (!user) {
+    res.status(400).json({ error: "User not found" });
+    return;
+  }
+
   const data = await pool.query<IFamilyEntity>(`${getFamilySql}`, [
     user.family_id,
   ]);

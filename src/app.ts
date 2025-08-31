@@ -5,6 +5,7 @@ import bearerToken from "express-bearer-token";
 import dotenv from "dotenv";
 import mainRouter from "./routes/users";
 import bookRouter from "./routes/books";
+import analitycsRouter from "./routes/analitycs";
 import genresRouter from "./routes/genres";
 import authorsRouter from "./routes/authors";
 import cyclesRouter from "./routes/cycles";
@@ -61,6 +62,7 @@ app.use("/family", authMiddleware, familyRouter);
 app.use("/authors", authMiddleware, authorsRouter);
 app.use("/genres", authMiddleware, genresRouter);
 app.use("/cycles", authMiddleware, cyclesRouter);
+app.use("/analytics", authMiddleware, analitycsRouter);
 
 // Роут для тестирования БД
 app.get("/test-db", async (req, res) => {
