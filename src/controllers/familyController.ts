@@ -47,7 +47,7 @@ const get = async (req: Request, res: Response) => {
   ]);
 
   if (!data.rows.length) {
-    res.status(400).json({ error: "Family not found" });
+    res.status(200).json({ error: "Family not found" });
     return;
   }
 
