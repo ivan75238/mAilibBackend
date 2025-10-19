@@ -685,11 +685,7 @@ const removeMark = async (
   const book = await getBookById(type, id, user.id);
 
   try {
-    await removeReaderByBookIdAndUserId(
-      id,
-      book?.fantlab_id || "",
-      reader_ids
-    );
+    await removeReaderByBookIdAndUserId(id, book?.fantlab_id || "", reader_ids);
 
     res.json({ message: "Book was unmarked" });
   } catch (error) {
@@ -722,12 +718,152 @@ const removeBookFromLibrary = async (
   }
 };
 
-const getUserLibrary = async (req: Request<{}, {}, {}>, res: Response) => {
+const getUserLibrary = async (
+  req: Request<
+    { page?: string; limit?: string; sortBy?: string; sortOrder?: string },
+    {},
+    {}
+  >,
+  res: Response
+) => {
   const user = getUserInSession(req, res);
 
-  const { rows } = await pool.query(getUserLibrarySql, [user.id]);
+  // Параметры пагинации и сортировки
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const sortBy = (req.query.sortBy as string) || "name";
+  const sortOrder = (req.query.sortOrder as string) || "ASC";
 
-  res.json(rows);
+  const offset = (page - 1) * limit;
+
+  // Валидация параметров сортировки
+  const validSortColumns = [
+    "name",
+    "authors_info",
+    "genres_info",
+    "read_count",
+  ];
+  const validSortOrders = ["ASC", "DESC"];
+
+  const finalSortBy = validSortColumns.includes(sortBy) ? sortBy : "name";
+  const finalSortOrder = validSortOrders.includes(sortOrder.toUpperCase())
+    ? sortOrder.toUpperCase()
+    : "ASC";
+
+  // Определяем, используется ли пагинация
+  const usePagination =
+    req.query.page !== undefined || req.query.limit !== undefined;
+
+  try {
+    // Убираем точку с запятой из исходного SQL
+    let baseSql = getUserLibrarySql.trim();
+    if (baseSql.endsWith(";")) {
+      baseSql = baseSql.slice(0, -1);
+    }
+
+    // Оборачиваем исходный запрос во внешний SELECT чтобы иметь доступ ко всем полям
+    let wrappedSql = `SELECT * FROM (${baseSql}) as library_data`;
+
+    // Добавляем ORDER BY к обернутому запросу
+    let orderByClause;
+    switch (finalSortBy) {
+      case "authors_info":
+        // Упрощенная сортировка по авторам - берем первого автора или пустую строку
+        orderByClause = `(
+          COALESCE(
+            (SELECT (authors_info->0->>'author_name') 
+             FROM (SELECT authors_info) AS a 
+             WHERE authors_info::text != '[]'), 
+            ''
+          )
+        ) ${finalSortOrder}`;
+        break;
+      case "genres_info":
+        // Упрощенная сортировка по жанрам - берем первый жанр или пустую строку
+        orderByClause = `(
+          COALESCE(
+            (SELECT (genres_info->0->>'genre_name') 
+             FROM (SELECT genres_info) AS g 
+             WHERE genres_info::text != '[]'), 
+            ''
+          )
+        ) ${finalSortOrder}`;
+        break;
+      case "read_count":
+        orderByClause = `read_count ${finalSortOrder}`;
+        break;
+      default: // 'name'
+        orderByClause = `name ${finalSortOrder}`;
+    }
+
+    wrappedSql += ` ORDER BY ${orderByClause}`;
+
+    let dataResult;
+    let totalCount = 0;
+
+    if (usePagination) {
+      // Добавляем пагинацию к обернутому запросу
+      const paginatedSql = `${wrappedSql} LIMIT $2 OFFSET $3`;
+
+      // Запрос для получения общего количества
+      const countQuery = `
+        WITH family_members AS (
+          SELECT u.id::text AS member_id
+          FROM users u
+          WHERE u.family_id = (SELECT family_id FROM users WHERE id = $1)
+          OR u.id = $1
+        ),
+        family_books AS (
+          SELECT DISTINCT b.id
+          FROM books b
+          JOIN owners o ON (b.id = o.book_id OR b.fantlab_id = o.book_id)
+          JOIN family_members fm ON o.user_id = fm.member_id
+        )
+        SELECT COUNT(*) as total_count
+        FROM family_books
+      `;
+
+      // Выполняем оба запроса параллельно
+      const [data, countResult] = await Promise.all([
+        pool.query(paginatedSql, [user.id, limit, offset]),
+        pool.query(countQuery, [user.id]),
+      ]);
+
+      dataResult = data;
+      totalCount = parseInt(countResult.rows[0].total_count);
+    } else {
+      // Без пагинации
+      const finalSql = `${wrappedSql};`;
+      dataResult = await pool.query(finalSql, [user.id]);
+    }
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Возвращаем данные в зависимости от наличия параметров пагинации
+    if (usePagination) {
+      res.json({
+        data: dataResult.rows,
+        pagination: {
+          current_page: page,
+          total_pages: totalPages,
+          total_items: totalCount,
+          items_per_page: limit,
+          has_previous: page > 1,
+          has_next: page < totalPages,
+        },
+        sort: {
+          by: finalSortBy,
+          order: finalSortOrder,
+        },
+      });
+    } else {
+      // Без пагинации - возвращаем исходный формат
+      res.json(dataResult.rows);
+    }
+  } catch (error) {
+    console.error("Error fetching user library:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 };
 
 const getUsersIdWhoDoesntHaveBook = async (

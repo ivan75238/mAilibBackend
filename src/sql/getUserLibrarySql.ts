@@ -84,5 +84,5 @@ SELECT
 FROM family_books fb
 LEFT JOIN all_readings ar ON ar.original_book_id = fb.id
 GROUP BY fb.id, fb.name, fb.fantlab_id, fb.type
-ORDER BY fb.name;
+ORDER BY fb.name
 `;
