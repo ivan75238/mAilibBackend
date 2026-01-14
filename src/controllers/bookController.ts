@@ -5,7 +5,8 @@ import { groupBy } from "lodash";
 import {
   FANTLAB_GET_EDITION,
   FANTLAB_GET_WORK,
-  FANTLAB_SEARCH_MAIN,
+  FANTLAB_SEARCH_EDITIONS,
+  FANTLAB_SEARCH_WORKS,
 } from "../consts/fantlabUrls";
 import { IFantlabSearchResponse } from "../interfaces/fantlab/IFantlabSearchResponse";
 import pool from "../db";
@@ -15,7 +16,6 @@ import { FantlabSearchTypeEnum } from "../enums/fantlabSearchTypeEnum";
 import {
   addAuthor,
   getAuthorByFantlabId,
-  getAuthorById,
   getAutorsByBookId,
   getAutorsByName,
 } from "./authorController";
@@ -101,53 +101,16 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
   };
 
   try {
-    const response = await fetch(`${FANTLAB_SEARCH_MAIN}?q=` + q);
-    const responseJson = await response.json();
-    let data: Array<
-      | IFantlabSearchResponse<
-          | FantlabSearchTypeEnum.AUTHORS
-          | FantlabSearchTypeEnum.WORKS
-          | FantlabSearchTypeEnum.EDITIONS
-        >
-      | IFantlabAuthor
-      | IFantlabWork
-      | IFantlabEdition
-    > = [];
-
-    if (Array.isArray(responseJson)) {
-      data = responseJson;
-    } else if (responseJson.matches?.length) {
-      data = responseJson.matches;
-    }
-
-    // 1, 3, 8, 13, 17, 41, 42, 43, - id типов, которые пропускаем
-    // взято из https://api.fantlab.ru/config.json
+    const responseWorks = await fetch(
+      `${FANTLAB_SEARCH_WORKS}?onlymatches=1&q=` + q
+    );
+    let worksData: Array<IFantlabWork> = await responseWorks.json();
 
     const books: IBookEntity[] = [];
-    const worksGroup = data.find((i) =>
-      isWorks(i as IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS>)
-    ) as IFantlabSearchResponse<FantlabSearchTypeEnum.WORKS>;
 
-    const editions: IBookEntity[] = [];
-    let editionsGroup = data.find((i) =>
-      isEditions(i as IFantlabSearchResponse<FantlabSearchTypeEnum.EDITIONS>)
-    ) as IFantlabSearchResponse<FantlabSearchTypeEnum.EDITIONS>;
-    const editionMatchItems = data.filter(
-      (i) => !!(i as IFantlabEdition).edition_id
-    ) as IFantlabEdition[];
-
-    if (!editionsGroup && editionMatchItems.length) {
-      editionsGroup = {
-        type: FantlabSearchTypeEnum.EDITIONS,
-        matches: editionMatchItems,
-      };
-    }
-
-    const inner: IBookEntity[] = [];
-
-    if (worksGroup?.matches?.length) {
+    if (worksData?.length) {
       await Promise.all(
-        worksGroup.matches
+        worksData
           .filter((i) => [1, 3, 8, 13, 17, 41, 42, 43].includes(i.work_type_id))
           .map(async (work) => {
             const authors: IAuthorDto[] = [];
@@ -195,9 +158,16 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
       );
     }
 
-    if (editionsGroup?.matches?.length) {
+    const responseEditions = await fetch(
+      `${FANTLAB_SEARCH_EDITIONS}?onlymatches=1&q=` + q
+    );
+    let editionsData: Array<IFantlabEdition> = await responseEditions.json();
+
+    const editions: IBookEntity[] = [];
+
+    if (editionsData?.length) {
       await Promise.all(
-        editionsGroup.matches.map(async (edition) => {
+        editionsData.map(async (edition) => {
           const authors: IAuthorDto[] = parseBracketAutors(edition.autors);
 
           const response = await fetch(
@@ -222,6 +192,8 @@ const search = async (req: Request<{ q?: string }, {}, {}>, res: Response) => {
         })
       );
     }
+
+    const inner: IBookEntity[] = [];
 
     //Поиск в нашей библиотеке
     const { rows } = await pool.query<IBookDto>(searchBook, [q]);
@@ -968,7 +940,7 @@ const createBookInDb = async (
             } else {
               const newAuthor = {
                 id: uuid(),
-                fantlab_id: undefined,
+                fantlab_id: -1,
                 name: author.name || "",
               };
 
@@ -1002,7 +974,7 @@ const createBookInDb = async (
             } else {
               const newGenre = {
                 id: uuid(),
-                fantlab_id: undefined,
+                fantlab_id: -1,
                 name: genre.name || "",
               };
 
@@ -1037,7 +1009,7 @@ const createBookInDb = async (
               } else {
                 const newCycle = {
                   id: uuid(),
-                  fantlab_id: undefined,
+                  fantlab_id: -1,
                   name: cycle.name || "",
                   type: "цикл",
                 };
